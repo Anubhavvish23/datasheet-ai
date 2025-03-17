@@ -1,6 +1,6 @@
 import React, { useState, useRef, ChangeEvent, FormEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Send, Upload, Loader2, Database, Download, Trash2 } from 'lucide-react';
+import { FileSpreadsheet, Send, Upload, Loader2, Database, Download, Trash2, Sun, Moon } from 'lucide-react';
 
 interface ExcelData {
   sheets: string[];
@@ -23,12 +23,17 @@ function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isFileDrawerOpen, setIsFileDrawerOpen] = useState<boolean>(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const GROQ_API_KEY = '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';
   const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+  const toggleDarkMode = () => {
+    setIsDarkMode((prev) => !prev);
+  };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -97,16 +102,29 @@ function App() {
 
   const prepareDataForAnalysis = (data: any[]) => {
     const columns = Object.keys(data[0] || {});
-    const sampleSize = 5;
-    const firstRows = data.slice(0, sampleSize);
-    const lastRows = data.slice(-sampleSize);
     const totalRows = data.length;
+
+    // Summarize the data by calculating basic statistics for each column
+    const summary = columns.map((column) => {
+      const values = data.map((row) => row[column]);
+      const numericValues = values.filter((v) => !isNaN(parseFloat(v))).map((v) => parseFloat(v));
+      const isNumeric = numericValues.length > 0;
+
+      if (isNumeric) {
+        const min = Math.min(...numericValues);
+        const max = Math.max(...numericValues);
+        const avg = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+        return `${column}: Min=${min}, Max=${max}, Avg=${avg.toFixed(2)}`;
+      } else {
+        const uniqueValues = [...new Set(values)];
+        return `${column}: ${uniqueValues.length} unique values`;
+      }
+    });
 
     return {
       columns,
       totalRows,
-      sampleData: [...firstRows, ...lastRows],
-      summary: `Dataset contains ${totalRows} rows with columns: ${columns.join(', ')}`,
+      summary: `Dataset contains ${totalRows} rows with columns: ${columns.join(', ')}. Summary: ${summary.join('; ')}`,
     };
   };
 
@@ -129,9 +147,6 @@ function App() {
     try {
       const analyzableData = prepareDataForAnalysis(excelData.data);
 
-      // Truncate or summarize data to avoid token limit issues
-      const truncatedData = JSON.stringify(analyzableData.sampleData, null, 2).slice(0, 2000); // Limit to 2000 characters
-
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
@@ -150,11 +165,10 @@ function App() {
               role: 'user',
               content: `Analyze this Excel data:
                 Summary: ${analyzableData.summary}
-                Sample data: ${truncatedData}
                 
                 Query: ${currentQuery}
                 
-                Note: This is a sample of the full dataset. Please provide insights based on the available data and mention this limitation in your analysis.`,
+                Note: This is a summary of the full dataset. Please provide insights based on the available data and mention this limitation in your analysis.`,
             },
           ],
         }),
@@ -247,31 +261,38 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className={`min-h-screen ${isDarkMode ? 'dark' : ''}`}>
       {/* Header */}
-      <header className="bg-white shadow-sm py-4 px-4 sm:px-6 lg:px-8">
+      <header className={`bg-white shadow-sm py-4 px-4 sm:px-6 lg:px-8 ${isDarkMode ? 'dark:bg-gray-800' : ''}`}>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Excel Chat Analysis</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Excel Chat Analysis</h1>
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={toggleDarkMode}
+              className="p-2 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200"
+              title="Toggle dark mode"
+            >
+              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <button
               onClick={() => setIsFileDrawerOpen((prev) => !prev)}
-              className="md:hidden p-2 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100"
+              className="md:hidden p-2 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-700 dark:text-blue-100"
             >
               <Database className="w-5 h-5" />
             </button>
             <button
               onClick={exportChatHistory}
-              className="p-2 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100"
+              className="p-2 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-700 dark:text-blue-100"
               title="Export chat history"
             >
               <Download className="w-5 h-5" />
             </button>
             <button
               onClick={clearChatHistory}
-              className="p-2 rounded-md bg-red-50 text-red-600 hover:bg-red-100"
+              className="p-2 rounded-md bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-700 dark:text-red-100"
               title="Clear chat history"
             >
               <Trash2 className="w-5 h-5" />
@@ -283,12 +304,12 @@ function App() {
       {/* Mobile drawer for file selection */}
       {isFileDrawerOpen && (
         <div className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex">
-          <div className="bg-white w-4/5 max-w-sm h-full p-4 overflow-y-auto">
+          <div className="bg-white w-4/5 max-w-sm h-full p-4 overflow-y-auto dark:bg-gray-800">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold">File Selection</h2>
+              <h2 className="text-lg font-semibold dark:text-gray-100">File Selection</h2>
               <button
                 onClick={() => setIsFileDrawerOpen(false)}
-                className="p-2 text-gray-500 hover:text-gray-700"
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100"
               >
                 ✕
               </button>
@@ -308,7 +329,7 @@ function App() {
                   />
                   <label
                     htmlFor="mobile-file-upload"
-                    className="flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer"
+                    className="flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
                   >
                     <Upload className="w-5 h-5 mr-2" />
                     Upload Files
@@ -318,11 +339,11 @@ function App() {
 
               {excelFiles.length > 0 && (
                 <div className="space-y-3">
-                  <div className="font-medium text-gray-700">Files:</div>
+                  <div className="font-medium text-gray-700 dark:text-gray-200">Files:</div>
                   {excelFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                    <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded dark:bg-gray-700">
                       <div
-                        className={`flex-1 truncate ${selectedFile === file.name ? 'font-semibold text-blue-600' : ''}`}
+                        className={`flex-1 truncate ${selectedFile === file.name ? 'font-semibold text-blue-600 dark:text-blue-300' : 'dark:text-gray-200'}`}
                         onClick={() => {
                           setSelectedFile(file.name);
                           readExcelFile(file);
@@ -333,7 +354,7 @@ function App() {
                       </div>
                       <button
                         onClick={() => removeFile(file.name)}
-                        className="text-gray-500 hover:text-red-600 ml-2"
+                        className="text-gray-500 hover:text-red-600 ml-2 dark:text-gray-300 dark:hover:text-red-400"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -342,11 +363,11 @@ function App() {
 
                   {excelData && (
                     <div className="space-y-2">
-                      <div className="font-medium text-gray-700">Sheet:</div>
+                      <div className="font-medium text-gray-700 dark:text-gray-200">Sheet:</div>
                       <select
                         value={selectedSheet}
                         onChange={handleSheetChange}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                       >
                         {excelData.sheets.map((sheet, index) => (
                           <option key={index} value={sheet}>
@@ -366,8 +387,8 @@ function App() {
       {/* Main content */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left sidebar - File selection (hidden on mobile) */}
-        <div className="hidden md:block md:w-64 lg:w-72 bg-white shadow-md p-4 overflow-y-auto">
-          <h2 className="text-lg font-semibold mb-4">Files</h2>
+        <div className={`hidden md:block md:w-64 lg:w-72 bg-white shadow-md p-4 overflow-y-auto dark:bg-gray-800`}>
+          <h2 className="text-lg font-semibold mb-4 dark:text-gray-100">Files</h2>
           <div className="space-y-4">
             <label className="block">
               <span className="sr-only">Choose Excel files</span>
@@ -382,7 +403,7 @@ function App() {
                 />
                 <label
                   htmlFor="file-upload"
-                  className="flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer"
+                  className="flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
                 >
                   <Upload className="w-5 h-5 mr-2" />
                   Upload Files
@@ -392,11 +413,11 @@ function App() {
 
             {excelFiles.length > 0 && (
               <div className="space-y-3">
-                <div className="font-medium text-gray-700">Files:</div>
+                <div className="font-medium text-gray-700 dark:text-gray-200">Files:</div>
                 {excelFiles.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                  <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded dark:bg-gray-700">
                     <div
-                      className={`flex-1 truncate cursor-pointer ${selectedFile === file.name ? 'font-semibold text-blue-600' : ''}`}
+                      className={`flex-1 truncate cursor-pointer ${selectedFile === file.name ? 'font-semibold text-blue-600 dark:text-blue-300' : 'dark:text-gray-200'}`}
                       onClick={() => {
                         setSelectedFile(file.name);
                         readExcelFile(file);
@@ -406,7 +427,7 @@ function App() {
                     </div>
                     <button
                       onClick={() => removeFile(file.name)}
-                      className="text-gray-500 hover:text-red-600 ml-2"
+                      className="text-gray-500 hover:text-red-600 ml-2 dark:text-gray-300 dark:hover:text-red-400"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -415,11 +436,11 @@ function App() {
 
                 {excelData && (
                   <div className="space-y-2">
-                    <div className="font-medium text-gray-700">Sheet:</div>
+                    <div className="font-medium text-gray-700 dark:text-gray-200">Sheet:</div>
                     <select
                       value={selectedSheet}
                       onChange={handleSheetChange}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                     >
                       {excelData.sheets.map((sheet, index) => (
                         <option key={index} value={sheet}>
@@ -438,14 +459,14 @@ function App() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Data Preview */}
           {excelData && (
-            <div className="p-4 bg-white border-b border-gray-200">
-              <h2 className="text-lg font-semibold mb-4">Data Preview</h2>
+            <div className={`p-4 bg-white border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700`}>
+              <h2 className="text-lg font-semibold mb-4 dark:text-gray-100">Data Preview</h2>
               <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border border-gray-200">
+                <table className="min-w-full bg-white border border-gray-200 dark:bg-gray-700 dark:border-gray-600">
                   <thead>
                     <tr>
                       {Object.keys(excelData.data[0] || {}).map((key) => (
-                        <th key={key} className="px-4 py-2 border border-gray-200 bg-gray-100 text-left text-sm font-semibold text-gray-700">
+                        <th key={key} className="px-4 py-2 border border-gray-200 bg-gray-100 text-left text-sm font-semibold text-gray-700 dark:bg-gray-600 dark:text-gray-200">
                           {key}
                         </th>
                       ))}
@@ -455,7 +476,7 @@ function App() {
                     {excelData.data.slice(0, 10).map((row, index) => (
                       <tr key={index}>
                         {Object.values(row).map((value, i) => (
-                          <td key={i} className="px-4 py-2 border border-gray-200 text-sm text-gray-700">
+                          <td key={i} className="px-4 py-2 border border-gray-200 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-200">
                             {String(value)}
                           </td>
                         ))}
@@ -470,15 +491,15 @@ function App() {
           {/* Chat history */}
           <div
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-4"
+            className={`flex-1 overflow-y-auto p-4 space-y-4 dark:bg-gray-900`}
           >
             {chatHistory.map((chat, index) => (
               <div key={index} className="space-y-2">
                 {/* User query */}
                 <div className="flex justify-end">
-                  <div className="bg-blue-100 text-blue-900 rounded-lg p-3 max-w-[80%]">
+                  <div className="bg-blue-100 text-blue-900 rounded-lg p-3 max-w-[80%] dark:bg-blue-700 dark:text-blue-100">
                     <p>{chat.query}</p>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1 dark:text-gray-300">
                       {chat.timestamp.toLocaleTimeString()}
                     </p>
                   </div>
@@ -486,13 +507,13 @@ function App() {
 
                 {/* Assistant response */}
                 <div className="flex justify-start">
-                  <div className="bg-gray-100 text-gray-900 rounded-lg p-3 max-w-[80%]">
+                  <div className="bg-gray-100 text-gray-900 rounded-lg p-3 max-w-[80%] dark:bg-gray-700 dark:text-gray-200">
                     <p
                       dangerouslySetInnerHTML={{
                         __html: chat.response,
                       }}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1 dark:text-gray-300">
                       {chat.timestamp.toLocaleTimeString()}
                     </p>
                   </div>
@@ -502,21 +523,21 @@ function App() {
           </div>
 
           {/* Chat input */}
-          <div className="border-t border-gray-200 p-4 bg-white">
+          <div className={`border-t border-gray-200 p-4 bg-white dark:bg-gray-800 dark:border-gray-700`}>
             <form onSubmit={chatWithExcel} className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Ask a question about your Excel data..."
-                className="flex-1 p-2 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 p-2 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                 rows={1}
                 disabled={loading}
               />
               <button
                 type="submit"
                 disabled={loading || !query}
-                className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300"
+                className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300 dark:bg-blue-700 dark:hover:bg-blue-800"
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
