@@ -28,9 +28,6 @@ function App() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const GROQ_API_KEY = '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';
-  const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-
   const toggleDarkMode = () => {
     setIsDarkMode((prev) => !prev);
   };
@@ -100,40 +97,44 @@ function App() {
     setIsFileDrawerOpen(false); // Close drawer after selection
   };
 
-  const prepareDataForAnalysis = (data: any[]) => {
-    const columns = Object.keys(data[0] || {});
-    const totalRows = data.length;
+  const searchExcelData = (query: string) => {
+    if (!excelData || !query) return null;
 
-    // Summarize the data by calculating basic statistics for each column
-    const summary = columns.map((column) => {
-      const values = data.map((row) => row[column]);
-      const numericValues = values.filter((v) => !isNaN(parseFloat(v))).map((v) => parseFloat(v));
-      const isNumeric = numericValues.length > 0;
+    // Convert query to lowercase for case-insensitive search
+    const searchTerm = query.toLowerCase();
 
-      if (isNumeric) {
-        const min = Math.min(...numericValues);
-        const max = Math.max(...numericValues);
-        const avg = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
-        return `${column}: Min=${min}, Max=${max}, Avg=${avg.toFixed(2)}`;
-      } else {
-        const uniqueValues = [...new Set(values)];
-        return `${column}: ${uniqueValues.length} unique values`;
-      }
+    // Search through all columns for matching rows
+    const matchingRows = excelData.data.filter((row) => {
+      return Object.values(row).some((value) =>
+        String(value).toLowerCase().includes(searchTerm)
+      );
     });
 
-    return {
-      columns,
-      totalRows,
-      summary: `Dataset contains ${totalRows} rows with columns: ${columns.join(', ')}. Summary: ${summary.join('; ')}`,
-    };
+    return matchingRows;
   };
 
-  const formatResponse = (response: string) => {
-    // Add bold headings and proper spacing
-    return response
-      .replace(/(\d+\.\s+[A-Za-z\s-]+:)/g, '<strong>$1</strong>') // Bold headings
-      .replace(/(\n)/g, '<br />') // Add line breaks
-      .replace(/(\d+\.\s+)/g, '<br /><strong>$1</strong>'); // Add spacing before numbered points
+  const formatResponse = (rows: any[]) => {
+    if (rows.length === 0) {
+      return '<p>No matching data found in the Excel sheet.</p>';
+    }
+
+    // Create a table with the matching rows
+    const columns = Object.keys(rows[0] || {});
+    const tableHeaders = columns.map((col) => `<th class="px-4 py-2 bg-gray-100 dark:bg-gray-600">${col}</th>`).join('');
+    const tableRows = rows.map((row) => {
+      const cells = columns.map((col) => `<td class="px-4 py-2 border border-gray-200 dark:border-gray-600">${row[col]}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+
+    return `
+      <p>Found ${rows.length} matching row(s):</p>
+      <table class="min-w-full bg-white border border-gray-200 dark:bg-gray-700 dark:border-gray-600">
+        <thead>
+          <tr>${tableHeaders}</tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    `;
   };
 
   const chatWithExcel = async (e?: FormEvent) => {
@@ -145,49 +146,11 @@ function App() {
     setQuery(''); // Clear the input field immediately
 
     try {
-      const analyzableData = prepareDataForAnalysis(excelData.data);
+      // Search for matching rows in the Excel data
+      const matchingRows = searchExcelData(currentQuery);
 
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'mixtral-8x7b-32768',
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a helpful assistant that analyzes Excel data. Provide clear, concise insights based on the available data sample. Format your response with bold headings, bullet points, and proper spacing for better readability.',
-            },
-            {
-              role: 'user',
-              content: `Analyze this Excel data:
-                Summary: ${analyzableData.summary}
-                
-                Query: ${currentQuery}
-                
-                Note: This is a summary of the full dataset. Please provide insights based on the available data and mention this limitation in your analysis.`,
-            },
-          ],
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to get response from API');
-      }
-
-      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-        throw new Error('Invalid response format from API');
-      }
-
-      const responseText = data.choices[0].message.content;
-
-      // Format the response
-      const formattedResponse = formatResponse(responseText);
+      // Format the response as a table
+      const formattedResponse = formatResponse(matchingRows || []);
 
       setChatHistory((prev) => [
         ...prev,
@@ -507,16 +470,12 @@ function App() {
 
                 {/* Assistant response */}
                 <div className="flex justify-start">
-                  <div className="bg-gray-100 text-gray-900 rounded-lg p-3 max-w-[80%] dark:bg-gray-700 dark:text-gray-200">
-                    <p
-                      dangerouslySetInnerHTML={{
-                        __html: chat.response,
-                      }}
-                    />
-                    <p className="text-xs text-gray-500 mt-1 dark:text-gray-300">
-                      {chat.timestamp.toLocaleTimeString()}
-                    </p>
-                  </div>
+                  <div
+                    className="bg-gray-100 text-gray-900 rounded-lg p-3 max-w-[80%] dark:bg-gray-700 dark:text-gray-200"
+                    dangerouslySetInnerHTML={{
+                      __html: chat.response,
+                    }}
+                  />
                 </div>
               </div>
             ))}
