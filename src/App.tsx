@@ -1,6 +1,6 @@
 import React, { useState, useRef, ChangeEvent, FormEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Send, Upload, Loader2, Database, Download, Trash2, Sun, Moon } from 'lucide-react';
+import { FileSpreadsheet, Send, Upload, Loader2, Database, Download, Trash2, Sun, Moon, BarChart } from 'lucide-react';
 
 interface ExcelData {
   sheets: string[];
@@ -97,44 +97,251 @@ function App() {
     setIsFileDrawerOpen(false); // Close drawer after selection
   };
 
-  const searchExcelData = (query: string) => {
-    if (!excelData || !query) return null;
+  // Advanced search with filtering and sorting capabilities
+  const processExcelQuery = (query: string) => {
+    if (!excelData || !query) return { rows: [], summary: "No data available" };
 
     // Convert query to lowercase for case-insensitive search
-    const searchTerm = query.toLowerCase();
+    const queryLower = query.toLowerCase();
 
-    // Search through all columns for matching rows
-    const matchingRows = excelData.data.filter((row) => {
+    // Check for filter keywords
+    const isFilterQuery = 
+      queryLower.includes("filter") || 
+      queryLower.includes("show") || 
+      queryLower.includes("only") || 
+      queryLower.includes("which") ||
+      queryLower.includes("where");
+
+    // Check for sort keywords
+    const isSortQuery = 
+      queryLower.includes("sort") || 
+      queryLower.includes("order by") || 
+      queryLower.includes("arrange");
+
+    // Check for summarize keywords
+    const isSummarizeQuery = 
+      queryLower.includes("summarize") || 
+      queryLower.includes("summary") || 
+      queryLower.includes("stats") || 
+      queryLower.includes("statistics") ||
+      queryLower.includes("count");
+
+    // Default search matches any value containing the search term
+    let matchingRows = excelData.data.filter((row) => {
       return Object.values(row).some((value) =>
-        String(value).toLowerCase().includes(searchTerm)
+        String(value).toLowerCase().includes(queryLower)
       );
     });
 
-    return matchingRows;
+    // Handle specific filter queries
+    if (isFilterQuery) {
+      // Extract potential column names from the data
+      const columns = excelData.data.length > 0 ? Object.keys(excelData.data[0]) : [];
+      
+      // Find value criteria like "ok", "not ok", etc.
+      const commonValues = ["ok", "not ok", "yes", "no", "true", "false", "pass", "fail"];
+      const valueMatches = commonValues.filter(val => queryLower.includes(val));
+      
+      // Try to identify which column and value to filter by
+      let targetColumn = "";
+      let targetValue = "";
+
+      // Look for column names in the query
+      for (const col of columns) {
+        if (queryLower.includes(col.toLowerCase())) {
+          targetColumn = col;
+          break;
+        }
+      }
+
+      // If we found a value to filter by
+      if (valueMatches.length > 0) {
+        targetValue = valueMatches[0];
+        
+        // If no specific column was mentioned, search all columns
+        if (!targetColumn) {
+          matchingRows = excelData.data.filter(row => {
+            return Object.entries(row).some(([col, val]) => 
+              String(val).toLowerCase() === targetValue
+            );
+          });
+        } else {
+          // Filter by the specific column and value
+          matchingRows = excelData.data.filter(row => {
+            return String(row[targetColumn]).toLowerCase() === targetValue;
+          });
+        }
+      }
+      // If no common value was found but a column was mentioned, return all entries with non-empty values for that column
+      else if (targetColumn) {
+        matchingRows = excelData.data.filter(row => {
+          return row[targetColumn] !== undefined && row[targetColumn] !== null && row[targetColumn] !== "";
+        });
+      }
+    }
+
+    // Handle sorting
+    if (isSortQuery) {
+      const columns = excelData.data.length > 0 ? Object.keys(excelData.data[0]) : [];
+      let sortColumn = "";
+      
+      // Check which column to sort by
+      for (const col of columns) {
+        if (queryLower.includes(col.toLowerCase())) {
+          sortColumn = col;
+          break;
+        }
+      }
+
+      // If a column was found, sort by it
+      if (sortColumn) {
+        const isDescending = 
+          queryLower.includes("descending") || 
+          queryLower.includes("desc") || 
+          queryLower.includes("high to low") ||
+          queryLower.includes("largest") ||
+          queryLower.includes("highest");
+
+        matchingRows = [...matchingRows].sort((a, b) => {
+          const valA = a[sortColumn];
+          const valB = b[sortColumn];
+          
+          // Handle numeric sorting
+          if (!isNaN(Number(valA)) && !isNaN(Number(valB))) {
+            return isDescending 
+              ? Number(valB) - Number(valA) 
+              : Number(valA) - Number(valB);
+          }
+          
+          // Handle string sorting
+          return isDescending 
+            ? String(valB).localeCompare(String(valA)) 
+            : String(valA).localeCompare(String(valB));
+        });
+      }
+    }
+
+    // Generate summary statistics
+    let summary = generateSummary(matchingRows, isSummarizeQuery);
+
+    return { rows: matchingRows, summary };
   };
 
-  const formatResponse = (rows: any[]) => {
+  // Generate summary statistics for the data
+  const generateSummary = (rows: any[], forceSummarize: boolean = false) => {
+    if (rows.length === 0) return "No data available for summary.";
+    
+    // If there are too many rows or summarize is explicitly requested, create a summary
+    if (forceSummarize || rows.length > 10) {
+      const summary = [];
+      summary.push(`Total rows: ${rows.length}`);
+      
+      // Identify numeric columns for statistics
+      const firstRow = rows[0];
+      const columns = Object.keys(firstRow);
+      
+      // Count occurrences of each value for categorical columns
+      const categoricalStats: {[key: string]: {[key: string]: number}} = {};
+      
+      // Calculate min, max, avg for numeric columns
+      const numericStats: {[key: string]: {min: number, max: number, sum: number, avg: number}} = {};
+      
+      columns.forEach(col => {
+        // Check if column has numeric values
+        const hasNumeric = rows.some(row => !isNaN(Number(row[col])));
+        
+        if (hasNumeric) {
+          const values = rows.map(row => Number(row[col])).filter(val => !isNaN(val));
+          if (values.length > 0) {
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const sum = values.reduce((a, b) => a + b, 0);
+            const avg = sum / values.length;
+            
+            numericStats[col] = { min, max, sum, avg };
+          }
+        } 
+        
+        // Also collect categorical stats for columns with few unique values
+        const uniqueValues = new Set(rows.map(row => String(row[col])));
+        if (uniqueValues.size <= 10) {
+          categoricalStats[col] = {};
+          rows.forEach(row => {
+            const val = String(row[col]);
+            categoricalStats[col][val] = (categoricalStats[col][val] || 0) + 1;
+          });
+        }
+      });
+      
+      // Add numeric statistics to summary
+      for (const [col, stats] of Object.entries(numericStats)) {
+        summary.push(`${col}: Min=${stats.min.toFixed(2)}, Max=${stats.max.toFixed(2)}, Avg=${stats.avg.toFixed(2)}`);
+      }
+      
+      // Add top categorical distributions
+      for (const [col, counts] of Object.entries(categoricalStats)) {
+        const topEntries = Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3);
+        
+        if (topEntries.length > 0) {
+          const distributionText = topEntries
+            .map(([val, count]) => `${val}: ${count} (${((count / rows.length) * 100).toFixed(1)}%)`)
+            .join(", ");
+          
+          summary.push(`${col} distribution: ${distributionText}`);
+        }
+      }
+      
+      return summary.join("<br>");
+    }
+    
+    return ""; // Empty summary if not needed
+  };
+
+  const formatResponse = (result: { rows: any[], summary: string }) => {
+    const { rows, summary } = result;
+    
     if (rows.length === 0) {
       return '<p>No matching data found in the Excel sheet.</p>';
     }
 
+    let response = "";
+    
+    // Add summary if available
+    if (summary) {
+      response += `<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md dark:bg-blue-900 dark:border-blue-700">
+        <h3 class="font-medium mb-2 text-blue-700 dark:text-blue-300">Summary</h3>
+        <div class="text-sm text-blue-600 dark:text-blue-200">${summary}</div>
+      </div>`;
+    }
+
     // Create a table with the matching rows
     const columns = Object.keys(rows[0] || {});
-    const tableHeaders = columns.map((col) => `<th class="px-4 py-2 bg-gray-100 dark:bg-gray-600">${col}</th>`).join('');
+    const tableHeaders = columns.map((col) => 
+      `<th class="px-4 py-2 bg-gray-100 dark:bg-gray-600 sticky top-0">${col}</th>`
+    ).join('');
+    
     const tableRows = rows.map((row) => {
-      const cells = columns.map((col) => `<td class="px-4 py-2 border border-gray-200 dark:border-gray-600">${row[col]}</td>`).join('');
+      const cells = columns.map((col) => 
+        `<td class="px-4 py-2 border border-gray-200 dark:border-gray-600">${row[col]}</td>`
+      ).join('');
       return `<tr>${cells}</tr>`;
     }).join('');
 
-    return `
+    response += `
       <p>Found ${rows.length} matching row(s):</p>
-      <table class="min-w-full bg-white border border-gray-200 dark:bg-gray-700 dark:border-gray-600">
-        <thead>
-          <tr>${tableHeaders}</tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
+      <div class="overflow-x-auto max-h-96">
+        <table class="min-w-full bg-white border border-gray-200 dark:bg-gray-700 dark:border-gray-600">
+          <thead>
+            <tr>${tableHeaders}</tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
     `;
+
+    return response;
   };
 
   const chatWithExcel = async (e?: FormEvent) => {
@@ -146,11 +353,11 @@ function App() {
     setQuery(''); // Clear the input field immediately
 
     try {
-      // Search for matching rows in the Excel data
-      const matchingRows = searchExcelData(currentQuery);
+      // Process the query with advanced filtering and sorting
+      const result = processExcelQuery(currentQuery);
 
-      // Format the response as a table
-      const formattedResponse = formatResponse(matchingRows || []);
+      // Format the response as a table with summary
+      const formattedResponse = formatResponse(result);
 
       setChatHistory((prev) => [
         ...prev,
@@ -415,6 +622,33 @@ function App() {
                 )}
               </div>
             )}
+
+            {/* Query suggestions */}
+            {excelData && (
+              <div className="mt-6 space-y-2">
+                <h3 className="font-medium text-gray-700 dark:text-gray-200">Try asking:</h3>
+                <div className="space-y-2 text-sm">
+                  <div 
+                    className="p-2 bg-blue-50 text-blue-700 rounded cursor-pointer hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-200"
+                    onClick={() => setQuery("Show me all rows where status is OK")}
+                  >
+                    "Show me all rows where status is OK"
+                  </div>
+                  <div 
+                    className="p-2 bg-blue-50 text-blue-700 rounded cursor-pointer hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-200"
+                    onClick={() => setQuery("Sort by date descending")}
+                  >
+                    "Sort by date descending"
+                  </div>
+                  <div 
+                    className="p-2 bg-blue-50 text-blue-700 rounded cursor-pointer hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-200"
+                    onClick={() => setQuery("Summarize the data")}
+                  >
+                    "Summarize the data"
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -488,15 +722,14 @@ function App() {
                 ref={textareaRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask a question about your Excel data..."
-                className="flex-1 p-2 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
-                rows={1}
-                disabled={loading}
+                placeholder="Ask a question about your Excel data (e.g., 'Show me all rows where status is OK', 'Sort by date')"
+                className="flex-1 p-2 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:                dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:focus:ring-blue-600"
+                rows={3}
               />
               <button
                 type="submit"
                 disabled={loading || !query}
-                className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300 dark:bg-blue-700 dark:hover:bg-blue-800"
+                className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-blue-300 dark:bg-blue-700 dark:hover:bg-blue-800 dark:focus:ring-blue-600"
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
